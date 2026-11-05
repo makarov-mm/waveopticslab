@@ -2,7 +2,7 @@
 
 ![preview](preview.png)
 
-**Interface update:** This project uses the shared modern WinAPI interface: flat themed controls, scrollable settings and keyboard navigation. See [Modern UI](../../MODERN_UI.md). Simulation shortcuts apply when the 3D canvas has focus; focused controls use their native keys.
+The settings column uses native Windows controls with flat themed painting, scrolling and keyboard navigation (`ModernUI.hpp`). Simulation shortcuts apply when the 3D canvas has focus; focused controls use their native keys.
 
 A native Windows laboratory for **three-dimensional scalar wave propagation**. OpenGL compute shaders evolve the field throughout a cubic volume, including propagation along X, Y and Z, diffraction at finite apertures, coherent interference, and refraction through a variable-index medium. A volume renderer, movable slices and a two-dimensional detector read the GPU data directly.
 
@@ -11,11 +11,10 @@ The project uses **C++23, WinAPI, WGL, OpenGL 4.3 Core and Visual Studio 2026**.
 ## Build and run
 
 1. Install Visual Studio 2026 with **Desktop development with C++**, **MSVC v145**, and a Windows SDK.
-2. Open `WaveOpticsLab3D.sln` in the package root. The full collection also supports `PhysicsLab.sln`.
-3. Build **Release | x64** and run `04_WaveOpticsLab`.
-4. Alternatively, run `powershell -ExecutionPolicy Bypass -File .\BuildWaveOptics3D.ps1`.
+2. Open `WaveOpticsLab.slnx`, build **Release | x64** and run `WaveOpticsLab`.
+3. Alternatively, run `powershell -ExecutionPolicy Bypass -File .\Build.ps1`.
 
-The executable is `bin/x64/Release/04_WaveOpticsLab.exe`. It runs from any working directory. Debug and Release use the static Microsoft runtime, with only Windows system DLLs and the installed graphics driver needed at runtime. MSVC 14.51.36231 uses `/std:c++23preview` for C++23. Both configurations use x64 and toolset v145.
+The executable is `bin/x64/Release/WaveOpticsLab.exe`. It runs from any working directory. Debug and Release use the static Microsoft runtime and compile at warning level 4, with only Windows system DLLs and the installed graphics driver needed at runtime. MSVC 14.51 uses `/std:c++23preview` for C++23. Both configurations use x64 and toolset v145. The minimum window size is 1080 × 760 physical pixels; the default is 1360 × 1000.
 
 An interactive desktop and **OpenGL 4.3 Core** graphics driver are required. OpenGL 4.0–4.2 alone does not provide the core compute features used here. Context or shader failures produce an error message; the program does not silently fall back to CPU physics. OpenGL entry points are loaded directly through WGL, using the Windows SDK headers and import libraries.
 
@@ -58,7 +57,7 @@ The domain is `[0,1]³` and vacuum wave speed is **c₀ = 1**. Coordinates and v
 
 The wavelength slider automatically keeps at least **eight grid intervals per local wavelength**, including inside the lens. Its minimum is `8 * maximumIndex / (N-1)`; its maximum is `max(0.24, minimum + 0.08)`. Changing grid resolution or index remaps this range and can change the selected vacuum wavelength; check the updated label when comparing experiments. Eight intervals is a practical lower limit, not a guarantee of negligible dispersion. Use more intervals for precision studies.
 
-At a nominal 60 Hz application update, the solver takes `ceil(N/12)` physical steps. Slow hardware slows simulated time rather than increasing the numerical timestep. The status reports the 3D cell count, GPU compute time for the previous completed batch, display fps, simulated time, Courant number, minimum local wavelength sampling, maximum amplitude and raw detector peak. GPU timing excludes rendering and CPU readback.
+At a nominal 60 Hz application update, the solver takes `ceil(N/12)` physical steps. The main loop accumulates real time and runs one update per elapsed 1/60 s, at most one per rendered frame, so slow hardware slows simulated time rather than increasing the numerical timestep. The status reports the 3D cell count, GPU compute time for the previous completed batch, display fps, simulated time, Courant number, minimum local wavelength sampling, maximum amplitude and raw detector peak. GPU timing excludes rendering and CPU readback.
 
 ## Numerical model
 
@@ -98,7 +97,7 @@ CSV files contain two comment/metadata lines, followed by `y,z,mean_squared_ampl
 
 Seven SSBO bindings contain the current, previous and next scalar fields; mean intensity; index-squared/damping pairs; partial/final diagnostics; and the detector. Each compute invocation writes one independent grid cell and reads neighbors only from the immutable current time level. Three field buffers rotate after each dispatch. There are no floating-point atomics or inter-workgroup spin barriers.
 
-`GL_SHADER_STORAGE_BARRIER_BIT` separates dependent dispatches and rendering. `GL_BUFFER_UPDATE_BARRIER_BIT` precedes CPU readbacks. The CPU dispatches work, handles controls and camera geometry, and supplies uniforms. It does not advance the interactive wave equation. Full field readback and the CPU stencil exist only in validation; routine status downloads 48 bytes and detector export downloads one 2D plane.
+`GL_SHADER_STORAGE_BARRIER_BIT` separates dependent dispatches and rendering. `GL_BUFFER_UPDATE_BARRIER_BIT` precedes CPU readbacks. The CPU dispatches work, handles controls and camera geometry, and supplies the parameters through two `std140` uniform blocks, `Params` (grid, scene, source, geometry, material, time and display settings; 80 bytes) and `View` (camera frame; 80 bytes), mirrored by `optics::Params` and `optics::ViewParams` in `Model.hpp`. It does not advance the interactive wave equation. Routine status downloads 48 bytes and detector export downloads one 2D plane.
 
 The renderer ray-marches the actual volume with trilinear SSBO sampling and front-to-back compositing. Volume modes render at half viewport width and height and upscale with bilinear filtering to keep interaction responsive. Slice and detector modes render at full viewport resolution. Field resolution is independent of this display optimization. Box/slice outlines, the floor and optical-object outlines are explanatory graphics, not electromagnetic fields.
 
@@ -118,20 +117,15 @@ Finite apertures and a finite propagation distance can produce near-field patter
 
 ## Files
 
-- `WaveOptics3D.cpp`: application, native controls, GPU dispatch, renderer setup, detector export and validation.
-- `OpticsShaders.hpp`: embedded initialization, 3D wave, reduction and rendering shaders.
-- `GpuApi.hpp`: WGL bootstrap, OpenGL function loading, resources and shader diagnostics.
+- `Main.cpp`: entry point and the fixed-timestep main loop.
+- `App.hpp` / `App.cpp`: native window, settings panel, camera and mouse-source interaction, status line and the export dialog.
+- `Simulation.hpp`: GPU resources, field rotation, dispatch, diagnostics, rendering and detector export.
+- `Model.hpp`: model constants, `Settings`, `Metrics` and the uniform-block structs.
+- `OpticsShaders.hpp`: embedded initialization, 3D wave, reduction and rendering shaders as GLSL chunks.
+- `GpuApi.hpp`: WGL bootstrap, the OpenGL 4.3 entry points and enumerants the lab uses, program building.
 - `Math3D.hpp`: small vector and orbit-camera utilities.
-
-The full collection retains the old 2D `Simulation.cpp` for `PhysicsCore` and the legacy CPU regression tests. It is **not linked into the new executable** and is omitted from the standalone package. Project 04 no longer references `PhysicsCore`.
-
-## Validation
-
-Run `powershell -ExecutionPolicy Bypass -File .\TestWaveOptics3D.ps1` after building Release. It creates a real OpenGL context, runs `--gpu-test`, saves reports, framebuffer images and a sample detector CSV, and requires a passing process exit code and a fresh `ALL PASSED` report. Its explicit standard-stream pipes support automation hosts without inherited console handles. Tests briefly display a non-activating window and do not move the user's mouse.
-
-The suite checks an independent CPU stencil/EMA oracle, exact zero equilibrium, 3D discrete eigenmodes, energy conservation, dispersion convergence, pulse absorption, all optical experiments, detector symmetry, propagation outside the central slice, index-dependent focusing, multiple resolutions, minimum-wavelength stability, mouse-plane mapping, source release, five render modes, CSV export and native control handlers. `--smoke` advances 180 normal batches and saves `Lab04_smoke.txt` and `Lab04.bmp` to the working directory.
-
-See `ValidationWaveOptics3D/VALIDATION.md` and the logs for measured results and verification limits. Passing this suite does not establish accuracy for arbitrary optical hardware or all graphics drivers.
+- `ModernUI.hpp`: flat themed painting and scrolling for the native settings controls.
+- `WaveOpticsLab.vcxproj` / `Common.props` / `Build.ps1`: Visual Studio 2026 C++23 project, shared compiler settings and the command-line build script.
 
 ## References
 

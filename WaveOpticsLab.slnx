@@ -2,5 +2,5 @@
   <Configurations>
     <Platform Name="x64" />
   </Configurations>
-  <Project Path="WaveOpticsLab.vcxproj" />
+  <Project Path="WaveOpticsLab.vcxproj" Id="971249d6-ad03-4fb7-aa13-34d3c32898f6" />
 </Solution>
